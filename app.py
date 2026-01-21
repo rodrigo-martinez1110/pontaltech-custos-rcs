@@ -138,9 +138,18 @@ if not df_analytic.empty:
 # Garantir colunas SEMPRE
 # ==================================================
 
-for col in ["RCS QUANTIDADE", "RCS CUSTO", "SMS QUANTIDADE", "SMS CUSTO"]:
-    if col not in tabela.columns:
-        tabela[col] = 0
+# ==================================================
+# Forçar tipos numéricos (evita erro na Cloud)
+# ==================================================
+
+colunas_numericas = [
+    "RCS QUANTIDADE", "RCS CUSTO",
+    "SMS QUANTIDADE", "SMS CUSTO"
+]
+
+for col in colunas_numericas:
+    tabela[col] = pd.to_numeric(tabela[col], errors="coerce").fillna(0)
+
 
 # ==================================================
 # Aplicar Sintético (OUTBOUND)

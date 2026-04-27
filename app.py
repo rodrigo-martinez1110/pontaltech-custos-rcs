@@ -8,8 +8,8 @@ st.set_page_config(
     layout="wide",
 )
 
-PRECO_RCS = 0.105 / 100   # 0,105 centavos = R$ 0,00105
-PRECO_SMS = 0.05  / 100   # 0,05 centavos  = R$ 0,0005
+PRECO_RCS = 0.105   # R$ 0,105 por mensagem RCS
+PRECO_SMS = 0.05    # R$ 0,05  por mensagem SMS
 
 def fmt_brl(v):
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -57,8 +57,8 @@ st.title("📱 Calculadora de Custos — RCS & SMS")
 st.markdown("""
 | Tipo | Custo unitário |
 |------|---------------|
-| RCS  | 0,105 centavos → R$ 0,00105 / mensagem |
-| SMS  | 0,05 centavos  → R$ 0,0005  / mensagem |
+| RCS  | R$ 0,105 / mensagem |
+| SMS  | R$ 0,05  / mensagem |
 
 Faça upload de **um ou mais arquivos** — o tipo de cada um é detectado automaticamente.
 """)
@@ -196,6 +196,5 @@ if todas_linhas_export:
 
 st.divider()
 st.caption(
-    "Preços: RCS = 0,105 centavos/msg (R$ 0,00105) · SMS = 0,05 centavos/msg (R$ 0,0005) · "
-    "Valores arredondados para 2 casas decimais"
+    "Preços: RCS = R$ 0,105/msg · SMS = R$ 0,05/msg · Valores arredondados para 2 casas decimais"
 )

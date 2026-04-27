@@ -1,208 +1,165 @@
 import streamlit as st
 import pandas as pd
-import unicodedata
+import io
 
-st.set_page_config(page_title="Relatório de Custos", layout="wide")
-st.title("Relatório de Custos por Equipe")
-
-# ==================================================
-# Funções auxiliares
-# ==================================================
-
-def normalizar_texto(texto):
-    if pd.isna(texto):
-        return ""
-    texto = str(texto).lower()
-    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8")
-    return texto
-
-def identificar_equipe(nome_campanha):
-    texto = normalizar_texto(nome_campanha)
-
-    if any(p in texto for p in ["iniciativaprivada", "iniciativa privada", "clt"]):
-        return "CLT"
-    if any(p in texto for p in ["outbound", "aquisicao", "aquisição"]):
-        return "OUTBOUND"
-    if any(p in texto for p in ["ativacao", "csativacao", "ativação"]):
-        return "ATIVACAO"
-    if any(p in texto for p in ["csapp", "app", "aplicativo"]):
-        return "CSAPP"
-    if any(p in texto for p in ["cp", "inss", "cscp"]):
-        return "CP"
-
-    return "OUTROS"
-
-def custo_por_canal(canal):
-    canal = str(canal).lower()
-    if canal == "sms":
-        return 0.047
-    if canal == "rcs":
-        return 0.105
-    return 0.0
-
-# ==================================================
-# Upload
-# ==================================================
-
-arquivos = st.file_uploader(
-    "Envie os arquivos Analytic e/ou Sintético",
-    type=["csv"],
-    accept_multiple_files=True
+# ── Configuração da página ──────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Calculadora de Custos RCS & SMS",
+    page_icon="📱",
+    layout="wide",
 )
 
-df_analytic = pd.DataFrame()
-sms_sintetico_qtd = 0
-sms_sintetico_custo = 0.0
+# ── Preços ──────────────────────────────────────────────────────────────────
+PRECO_RCS = 0.00105   # R$ 0,105 centavos  → R$ 0,00105
+PRECO_SMS = 0.0005    # R$ 0,05 centavos   → R$ 0,0005
 
-# ==================================================
-# Processamento
-# ==================================================
+# ── Cabeçalho ───────────────────────────────────────────────────────────────
+st.title("📱 Calculadora de Custos — RCS & SMS")
+st.markdown(
+    """
+    Faça upload do relatório de campanhas para calcular o custo total de envios.
 
-if arquivos:
-    for arquivo in arquivos:
-        nome = arquivo.name.lower()
+    | Tipo | Custo unitário |
+    |------|---------------|
+    | RCS  | R$ 0,00105 / mensagem |
+    | SMS  | R$ 0,0005 / mensagem  |
+    """
+)
 
-        # ---------------- ANALYTIC ----------------
-        if "analytic" in nome:
-            df = pd.read_csv(arquivo, sep=None, engine="python")
+st.divider()
 
-            df["STATUS"] = df["STATUS"].str.upper()
-            df["CANAL"] = df["CANAL"].str.lower()
+# ── Upload ───────────────────────────────────────────────────────────────────
+arquivo = st.file_uploader(
+    "Selecione o arquivo CSV de campanhas",
+    type=["csv"],
+    help="Arquivo exportado do painel de campanhas (separador: ponto-e-vírgula)",
+)
 
-            df = df[
-                (
-                    (df["CANAL"] == "rcs") &
-                    (df["STATUS"].isin(["ENTREGUE", "ENVIADO", "LIDO"]))
-                )
-                |
-                (
-                    (df["CANAL"] == "sms") &
-                    (df["STATUS"].isin(["ENTREGUE", "ENVIADO", "NÃO ENTREGUE"]))
-                )
-            ]
+if arquivo is None:
+    st.info("⬆️ Aguardando upload do arquivo CSV...")
+    st.stop()
 
-            if not df.empty:
-                df["EQUIPE"] = df["NOME CAMPANHA"].apply(identificar_equipe)
-                df["CUSTO"] = df["CANAL"].apply(custo_por_canal)
-                df_analytic = pd.concat([df_analytic, df])
+# ── Leitura ──────────────────────────────────────────────────────────────────
+try:
+    df = pd.read_csv(arquivo, sep=";", encoding="utf-8")
+except UnicodeDecodeError:
+    arquivo.seek(0)
+    df = pd.read_csv(arquivo, sep=";", encoding="latin-1")
 
-        # ---------------- SINTÉTICO ----------------
-        if "sintetico" in nome or "sintético" in nome:
-            df_sint = pd.read_csv(arquivo, sep="\t")
+colunas_necessarias = {"TOTAL RCS ENVIADO", "TOTAL SMS ENVIADO"}
+if not colunas_necessarias.issubset(df.columns):
+    st.error(
+        f"❌ Colunas esperadas não encontradas no arquivo.\n\n"
+        f"Necessárias: `{', '.join(colunas_necessarias)}`\n\n"
+        f"Encontradas: `{', '.join(df.columns.tolist())}`"
+    )
+    st.stop()
 
-            df_sint = df_sint[df_sint["Conta"].isna()]
+# ── Conversão numérica ────────────────────────────────────────────────────────
+df["TOTAL RCS ENVIADO"] = pd.to_numeric(df["TOTAL RCS ENVIADO"], errors="coerce").fillna(0).astype(int)
+df["TOTAL SMS ENVIADO"] = pd.to_numeric(df["TOTAL SMS ENVIADO"], errors="coerce").fillna(0).astype(int)
 
-            df_sint["Total De Msg Tarifadas"] = (
-                df_sint["Total De Msg Tarifadas"]
-                .astype(str)
-                .str.replace(".", "", regex=False)
-                .str.replace(",", ".", regex=False)
-                .astype(float)
-            )
+# ── Cálculo por linha ─────────────────────────────────────────────────────────
+df["CUSTO RCS (R$)"]   = df["TOTAL RCS ENVIADO"] * PRECO_RCS
+df["CUSTO SMS (R$)"]   = df["TOTAL SMS ENVIADO"] * PRECO_SMS
+df["CUSTO TOTAL (R$)"] = df["CUSTO RCS (R$)"] + df["CUSTO SMS (R$)"]
 
-            sms_sintetico_qtd += int(df_sint["Total De Msg Tarifadas"].sum())
-            sms_sintetico_custo += sms_sintetico_qtd * 0.047
+# ── Totais gerais ─────────────────────────────────────────────────────────────
+total_rcs_msgs  = int(df["TOTAL RCS ENVIADO"].sum())
+total_sms_msgs  = int(df["TOTAL SMS ENVIADO"].sum())
+total_custo_rcs = df["CUSTO RCS (R$)"].sum()
+total_custo_sms = df["CUSTO SMS (R$)"].sum()
+total_geral     = total_custo_rcs + total_custo_sms
 
-# ==================================================
-# Tabela base segura (SEMPRE EXISTE)
-# ==================================================
+# ── KPIs ──────────────────────────────────────────────────────────────────────
+st.subheader("📊 Resumo Geral")
 
-tabela = pd.DataFrame(columns=[
-    "EQUIPE",
-    "RCS QUANTIDADE", "RCS CUSTO",
-    "SMS QUANTIDADE", "SMS CUSTO"
-])
+col1, col2, col3 = st.columns(3)
+col4, col5, col6 = st.columns(3)
 
-# ==================================================
-# Agregação Analytic (se houver)
-# ==================================================
+col1.metric("📨 Mensagens RCS Enviadas", f"{total_rcs_msgs:,}".replace(",", "."))
+col2.metric("📩 Mensagens SMS Enviadas", f"{total_sms_msgs:,}".replace(",", "."))
+col3.metric("📬 Total de Mensagens",     f"{total_rcs_msgs + total_sms_msgs:,}".replace(",", "."))
 
-if not df_analytic.empty:
-    base = (
-        df_analytic
-        .groupby(["EQUIPE", "CANAL"], as_index=False)
-        .agg(
-            QUANTIDADE=("CUSTO", "count"),
-            CUSTO=("CUSTO", "sum")
-        )
+col4.metric("💸 Custo RCS",   f"R$ {total_custo_rcs:,.4f}".replace(",", "X").replace(".", ",").replace("X", "."))
+col5.metric("💸 Custo SMS",   f"R$ {total_custo_sms:,.4f}".replace(",", "X").replace(".", ",").replace("X", "."))
+col6.metric("💰 Custo Total", f"R$ {total_geral:,.4f}".replace(",", "X").replace(".", ",").replace("X", "."), delta=None)
+
+st.divider()
+
+# ── Filtros ───────────────────────────────────────────────────────────────────
+st.subheader("🔍 Detalhamento por Campanha")
+
+with st.expander("Filtros", expanded=False):
+    col_f1, col_f2 = st.columns(2)
+
+    if "CONTA" in df.columns:
+        contas = ["Todas"] + sorted(df["CONTA"].dropna().unique().tolist())
+        conta_sel = col_f1.selectbox("Conta", contas)
+    else:
+        conta_sel = "Todas"
+
+    if "TIPO DA CAMPANHA" in df.columns:
+        tipos = ["Todos"] + sorted(df["TIPO DA CAMPANHA"].dropna().unique().tolist())
+        tipo_sel = col_f2.selectbox("Tipo de Campanha", tipos)
+    else:
+        tipo_sel = "Todos"
+
+df_filtrado = df.copy()
+if conta_sel != "Todas" and "CONTA" in df.columns:
+    df_filtrado = df_filtrado[df_filtrado["CONTA"] == conta_sel]
+if tipo_sel != "Todos" and "TIPO DA CAMPANHA" in df.columns:
+    df_filtrado = df_filtrado[df_filtrado["TIPO DA CAMPANHA"] == tipo_sel]
+
+# ── Colunas para exibição ─────────────────────────────────────────────────────
+colunas_exibir = []
+for c in ["NOME CAMPANHA", "DATA CRIACAO DA CAMPANHA", "TIPO DA CAMPANHA", "CONTA"]:
+    if c in df_filtrado.columns:
+        colunas_exibir.append(c)
+
+colunas_exibir += ["TOTAL RCS ENVIADO", "CUSTO RCS (R$)", "TOTAL SMS ENVIADO", "CUSTO SMS (R$)", "CUSTO TOTAL (R$)"]
+
+df_exibir = df_filtrado[colunas_exibir].copy()
+
+# Formatação monetária só para exibição
+def fmt_brl(v):
+    return f"R$ {v:,.4f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+st.dataframe(
+    df_exibir.style.format({
+        "CUSTO RCS (R$)":   fmt_brl,
+        "CUSTO SMS (R$)":   fmt_brl,
+        "CUSTO TOTAL (R$)": fmt_brl,
+    }),
+    use_container_width=True,
+    hide_index=True,
+)
+
+# ── Subtotais do filtro ────────────────────────────────────────────────────────
+if conta_sel != "Todas" or tipo_sel != "Todos":
+    st.caption(
+        f"**Subtotal filtrado** → "
+        f"RCS: {int(df_filtrado['TOTAL RCS ENVIADO'].sum()):,} msgs | "
+        f"SMS: {int(df_filtrado['TOTAL SMS ENVIADO'].sum()):,} msgs | "
+        f"Custo: R$ {df_filtrado['CUSTO TOTAL (R$)'].sum():,.4f}"
+        .replace(",", "X").replace(".", ",").replace("X", ".")
     )
 
-    piv = base.pivot(index="EQUIPE", columns="CANAL", values=["QUANTIDADE", "CUSTO"])
-    piv = piv.fillna(0)
-    piv.columns = [f"{c[1].upper()} {c[0]}" for c in piv.columns]
-    piv = piv.reset_index()
+st.divider()
 
-    tabela = pd.concat([tabela, piv], ignore_index=True)
+# ── Download ───────────────────────────────────────────────────────────────────
+st.subheader("⬇️ Exportar Resultado")
 
-# ==================================================
-# Garantir colunas SEMPRE
-# ==================================================
-
-# ==================================================
-# Forçar tipos numéricos (evita erro na Cloud)
-# ==================================================
-
-colunas_numericas = [
-    "RCS QUANTIDADE", "RCS CUSTO",
-    "SMS QUANTIDADE", "SMS CUSTO"
-]
-
-for col in colunas_numericas:
-    tabela[col] = pd.to_numeric(tabela[col], errors="coerce").fillna(0)
-
-
-# ==================================================
-# Aplicar Sintético (OUTBOUND)
-# ==================================================
-
-if sms_sintetico_qtd > 0:
-    if "OUTBOUND" in tabela["EQUIPE"].values:
-        tabela.loc[tabela["EQUIPE"] == "OUTBOUND", "SMS QUANTIDADE"] += sms_sintetico_qtd
-        tabela.loc[tabela["EQUIPE"] == "OUTBOUND", "SMS CUSTO"] += sms_sintetico_custo
-    else:
-        tabela = pd.concat([
-            tabela,
-            pd.DataFrame([{
-                "EQUIPE": "OUTBOUND",
-                "RCS QUANTIDADE": 0,
-                "RCS CUSTO": 0,
-                "SMS QUANTIDADE": sms_sintetico_qtd,
-                "SMS CUSTO": sms_sintetico_custo
-            }])
-        ], ignore_index=True)
-
-# ==================================================
-# Totais
-# ==================================================
-
-tabela["Quantidade Total"] = tabela["RCS QUANTIDADE"] + tabela["SMS QUANTIDADE"]
-tabela["Custo Total"] = (tabela["RCS CUSTO"] + tabela["SMS CUSTO"]).round(2)
-
-tabela = tabela[
-    [
-        "EQUIPE",
-        "RCS QUANTIDADE", "RCS CUSTO",
-        "SMS QUANTIDADE", "SMS CUSTO",
-        "Quantidade Total", "Custo Total"
-    ]
-]
-
-# ==================================================
-# Exibição
-# ==================================================
-
-st.subheader("Relatório Final")
-st.dataframe(tabela)
-
-csv = tabela.to_csv(
-    index=False,
-    sep=";",
-    decimal=","
-).encode("utf-8")
+csv_out = df[colunas_exibir].copy()
+buffer = io.BytesIO()
+csv_out.to_csv(buffer, index=False, sep=";", encoding="utf-8-sig")
+buffer.seek(0)
 
 st.download_button(
-    "📥 Baixar relatório",
-    csv,
-    file_name="relatorio_final.csv",
-    mime="text/csv"
+    label="📥 Baixar CSV com custos calculados",
+    data=buffer,
+    file_name="custos_campanhas.csv",
+    mime="text/csv",
 )
+
+st.caption("Preços aplicados: RCS = R$ 0,00105/msg · SMS = R$ 0,0005/msg")

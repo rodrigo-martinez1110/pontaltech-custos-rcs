@@ -10,8 +10,10 @@ st.set_page_config(
 )
 
 # ── Preços ──────────────────────────────────────────────────────────────────
-PRECO_RCS = 0.00105   # R$ 0,105 centavos  → R$ 0,00105
-PRECO_SMS = 0.0005    # R$ 0,05 centavos   → R$ 0,0005
+# Preços em centavos: 0.105 centavos de RCS e 0.05 centavos de SMS
+# 1 centavo = R$ 0,01  →  0.105 centavos = R$ 0,00105
+PRECO_RCS = 0.105 / 100   # R$ 0,00105
+PRECO_SMS = 0.05  / 100   # R$ 0,0005
 
 # ── Cabeçalho ───────────────────────────────────────────────────────────────
 st.title("📱 Calculadora de Custos — RCS & SMS")
@@ -60,9 +62,9 @@ df["TOTAL RCS ENVIADO"] = pd.to_numeric(df["TOTAL RCS ENVIADO"], errors="coerce"
 df["TOTAL SMS ENVIADO"] = pd.to_numeric(df["TOTAL SMS ENVIADO"], errors="coerce").fillna(0).astype(int)
 
 # ── Cálculo por linha ─────────────────────────────────────────────────────────
-df["CUSTO RCS (R$)"]   = df["TOTAL RCS ENVIADO"] * PRECO_RCS
-df["CUSTO SMS (R$)"]   = df["TOTAL SMS ENVIADO"] * PRECO_SMS
-df["CUSTO TOTAL (R$)"] = df["CUSTO RCS (R$)"] + df["CUSTO SMS (R$)"]
+df["CUSTO RCS (R$)"]   = (df["TOTAL RCS ENVIADO"] * PRECO_RCS).round(2)
+df["CUSTO SMS (R$)"]   = (df["TOTAL SMS ENVIADO"] * PRECO_SMS).round(2)
+df["CUSTO TOTAL (R$)"] = (df["CUSTO RCS (R$)"] + df["CUSTO SMS (R$)"]).round(2)
 
 # ── Totais gerais ─────────────────────────────────────────────────────────────
 total_rcs_msgs  = int(df["TOTAL RCS ENVIADO"].sum())
